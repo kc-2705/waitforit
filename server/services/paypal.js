@@ -59,6 +59,8 @@ const MESSAGES = {
   AUTHORIZATION_VOIDED: 'The PayPal hold was already released.',
   AUTHORIZATION_ALREADY_CAPTURED: 'This payment was already completed.',
   DECIMAL_PRECISION: 'That amount is not valid.',
+  CAPTURE_FULLY_REFUNDED: 'This purchase was already refunded.',
+  REFUND_TIME_LIMIT_EXCEEDED: 'It is too late to refund this purchase through PayPal.',
 };
 const paypalMessage = (issue) => MESSAGES[issue] || 'PayPal could not complete that step. Please try again.';
 
@@ -115,6 +117,15 @@ async function voidHold(authorizationId) {
   await request(`/v2/payments/authorizations/${encodeURIComponent(authorizationId)}/void`, { requestId: `void-${authorizationId}` });
 }
 
+/** Undo: refund the full captured amount back to the buyer. */
+async function refundCapture({ captureId, wishId, note }) {
+  const refund = await request(`/v2/payments/captures/${encodeURIComponent(captureId)}/refund`, {
+    body: { note_to_payer: note.slice(0, 255) },
+    requestId: `refund-${wishId}`,
+  });
+  return { refundId: refund.id, status: refund.status };
+}
+
 const configured = () => Boolean(env.paypal.clientId && env.paypal.secret);
 
-module.exports = { createHoldOrder, authorizeOrder, captureHold, voidHold, configured, _reset: () => (cachedToken = null) };
+module.exports = { createHoldOrder, authorizeOrder, captureHold, voidHold, refundCapture, configured, _reset: () => (cachedToken = null) };

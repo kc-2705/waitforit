@@ -36,7 +36,7 @@ const productSchema = new Schema(
 const eventSchema = new Schema(
   {
     at: { type: Date, default: Date.now },
-    kind: { type: String, enum: ['think', 'search', 'pay', 'check', 'drop', 'buy', 'wait', 'cancel', 'error'], default: 'think' },
+    kind: { type: String, enum: ['think', 'search', 'pay', 'check', 'drop', 'ask', 'buy', 'wait', 'cancel', 'refund', 'error'], default: 'think' },
     message: String,
   },
   { _id: false },
@@ -57,9 +57,19 @@ const wishSchema = new Schema(
     },
     // The most the user will pay. PayPal holds exactly this much.
     maxPrice: { type: Number, required: true, min: 1, max: 10000 },
+    // auto: buy as soon as a good deal is verified. ask: find the deal, then wait for the user's OK.
+    mode: { type: String, enum: ['auto', 'ask'], default: 'auto' },
+    // The AI's view on whether the limit is realistic, based on prices across stores.
+    advice: {
+      verdict: { type: String, enum: ['already_met', 'realistic', 'stretch', 'unlikely'] },
+      suggestedPrice: Number,
+      message: String,
+      low: Number,
+      typical: Number,
+    },
     status: {
       type: String,
-      enum: ['choosing', 'needs_payment', 'watching', 'buying', 'bought', 'cancelled', 'expired'],
+      enum: ['choosing', 'needs_payment', 'watching', 'awaiting_approval', 'buying', 'bought', 'refunded', 'cancelled', 'expired'],
       default: 'choosing',
       index: true,
     },
@@ -76,8 +86,18 @@ const wishSchema = new Schema(
       captureId: String,
       paid: Number,
       released: Number,
-      status: { type: String, enum: ['none', 'created', 'held', 'captured', 'voided'], default: 'none' },
+      refundId: String,
+      status: { type: String, enum: ['none', 'created', 'held', 'captured', 'voided', 'refunded'], default: 'none' },
       sample: Boolean,
+    },
+    // A verified deal waiting for the user's OK (ask mode).
+    pending: {
+      at: Date,
+      price: Number,
+      domain: String,
+      url: String,
+      reason: String,
+      simulated: Boolean,
     },
     purchase: {
       at: Date,
@@ -87,6 +107,7 @@ const wishSchema = new Schema(
       saved: Number,
       reason: String,
       simulated: Boolean,
+      refundedAt: Date,
     },
     journal: [eventSchema],
     lastCheckedAt: Date,

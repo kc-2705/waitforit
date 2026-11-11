@@ -29,6 +29,7 @@ function resetWorld() {
       case: { id: 'case', title: 'Hard case for Sony WH-1000XM5', brands: [{ name: 'Generic' }], images: [], offers: [offer('cases.com', 19)] },
     },
     decision: { action: 'buy', reason: 'Same headphones, new and in stock.' },
+    advice: { verdict: 'stretch', suggestedPrice: 160, message: 'The lowest price is $179; $150 needs a bigger sale than usual.' },
     captureFails: false,
     expires: undefined,
     calls: { ai: [], search: 0, product: 0, paypal: [] },
@@ -51,9 +52,11 @@ function fakeFetch(url, options = {}) {
     let content;
     if (name === 'wish_plan') content = world.plan;
     else if (name === 'ranking') {
+      world.rankPrompt = body.messages[1].content;
       const lines = body.messages[1].content.split('Products:\n')[1].split('\n');
       content = { items: lines.map((l, index) => ({ index, fit: /case/i.test(l) ? 5 : 92, reason: /case/i.test(l) ? 'An accessory, not headphones.' : 'The model you asked for.' })) };
-    } else content = world.decision;
+    } else if (name === 'price_advice') content = world.advice;
+    else content = world.decision;
     return json({ choices: [{ message: { content: JSON.stringify(content) } }] });
   }
 
@@ -87,6 +90,7 @@ function fakeFetch(url, options = {}) {
       return json({ id: 'CAPTURE-1', status: 'COMPLETED' }, 201);
     }
     if (/\/void$/.test(path)) return Promise.resolve(new Response(null, { status: 204 }));
+    if (/\/captures\/[^/]+\/refund$/.test(path)) return json({ id: 'REFUND-1', status: 'COMPLETED' }, 201);
   }
   return realFetch(url, options);
 }
@@ -105,8 +109,8 @@ async function signUp(email = 'shopper@example.com') {
 const paypalCalls = (re) => world.calls.paypal.filter((c) => re.test(c.path));
 
 /** Wish → choose Sony → PayPal hold approved. Returns the watched wish. */
-async function watchedWish({ text = 'Sony noise cancelling headphones under $150' } = {}) {
-  const created = await auth(request(app).post('/api/v1/wishes')).send({ text }).expect(201);
+async function watchedWish({ text = 'Sony noise cancelling headphones under $150', mode } = {}) {
+  const created = await auth(request(app).post('/api/v1/wishes')).send({ text, mode }).expect(201);
   const id = created.body.wish._id;
   await auth(request(app).post(`/api/v1/wishes/${id}/choose`)).send({ productId: 'sony' }).expect(200);
   const { orderId } = (await auth(request(app).post(`/api/v1/wishes/${id}/paypal/order`)).expect(200)).body;
@@ -146,6 +150,8 @@ describe('making a wish', () => {
     // The used $120 listing doesn't count when the wish asks for new.
     expect(res.body.wish.candidates[0].bestOffer.price).toBe(179);
     expect(world.calls.search).toBe(1);
+    // Price is hidden from the ranking step, so waiting-for-a-drop products aren't marked down.
+    expect(world.rankPrompt).not.toMatch(/\$\d/);
   });
 
   test('a price typed in the box wins over the one in the text', async () => {
@@ -311,6 +317,103 @@ describe('stopping and privacy', () => {
     expect((await request(app).get('/api/v1/wishes')).status).toBe(401);
     const config = (await request(app).get('/api/v1/config')).body;
     expect(config).toEqual({ paypalClientId: 'test-client', currency: 'USD', demoTools: true });
+  });
+});
+
+describe('fair-price advice', () => {
+  test('a new wish says whether the limit is realistic, using prices across stores', async () => {
+    const res = await auth(request(app).post('/api/v1/wishes')).send({ text: 'Sony headphones under $150' });
+    expect(res.body.wish.advice).toMatchObject({ verdict: 'stretch', suggestedPrice: 160, low: 179 });
+    expect(res.body.wish.journal.map((e) => e.message)).toContain(world.advice.message);
+  });
+
+  test('when something already costs less than the limit, no AI call is needed', async () => {
+    const res = await auth(request(app).post('/api/v1/wishes')).send({ text: 'Sony headphones under $200', maxPrice: 200 });
+    expect(res.body.wish.advice.verdict).toBe('already_met');
+    expect(world.calls.ai).not.toContain('price_advice');
+  });
+
+  test('if the advice answer is unusable, the wish still works without it', async () => {
+    world.advice = { verdict: 'maybe', suggestedPrice: -1, message: '' };
+    const res = await auth(request(app).post('/api/v1/wishes')).send({ text: 'Sony headphones under $150' });
+    expect(res.status).toBe(201);
+    expect(res.body.wish.advice?.verdict).toBeUndefined();
+  });
+});
+
+describe('ask me first', () => {
+  test('the agent finds the deal, waits for OK, and only charges after approval', async () => {
+    const wish = await watchedWish({ mode: 'ask' });
+    const found = await auth(request(app).post(`/api/v1/wishes/${wish._id}/simulate-drop`)).send({ price: 129 });
+    expect(found.body.wish.status).toBe('awaiting_approval');
+    expect(found.body.wish.pending).toMatchObject({ price: 129, domain: 'bestbuy.com' });
+    expect(paypalCalls(/capture$/)).toHaveLength(0);
+
+    const res = await auth(request(app).post(`/api/v1/wishes/${wish._id}/approve`));
+    expect(res.status).toBe(200);
+    expect(res.body.wish.status).toBe('bought');
+    expect(res.body.wish.payment.paid).toBe(129);
+    expect(paypalCalls(/capture$/)).toHaveLength(1);
+  });
+
+  test('saying no keeps watching, and approving twice is impossible', async () => {
+    const wish = await watchedWish({ mode: 'ask' });
+    await auth(request(app).post(`/api/v1/wishes/${wish._id}/simulate-drop`)).send({ price: 129 });
+    const no = await auth(request(app).post(`/api/v1/wishes/${wish._id}/decline`));
+    expect(no.body.wish.status).toBe('watching');
+    expect((await auth(request(app).post(`/api/v1/wishes/${wish._id}/approve`))).status).toBe(409);
+    expect(paypalCalls(/capture$/)).toHaveLength(0);
+  });
+
+  test('a waiting deal can be cancelled, which releases the hold', async () => {
+    const wish = await watchedWish({ mode: 'ask' });
+    await auth(request(app).post(`/api/v1/wishes/${wish._id}/simulate-drop`)).send({ price: 129 });
+    const res = await auth(request(app).post(`/api/v1/wishes/${wish._id}/cancel`));
+    expect(res.body.wish.status).toBe('cancelled');
+    expect(paypalCalls(/void$/)).toHaveLength(1);
+  });
+
+  test('the mode can be switched while shopping, but not after buying', async () => {
+    const wish = await watchedWish();
+    const res = await auth(request(app).patch(`/api/v1/wishes/${wish._id}/mode`)).send({ mode: 'ask' });
+    expect(res.body.wish.mode).toBe('ask');
+    expect((await auth(request(app).patch(`/api/v1/wishes/${wish._id}/mode`)).send({ mode: 'sometimes' })).status).toBe(400);
+    await auth(request(app).patch(`/api/v1/wishes/${wish._id}/mode`)).send({ mode: 'auto' });
+    await auth(request(app).post(`/api/v1/wishes/${wish._id}/simulate-drop`)).send({ price: 129 });
+    expect((await auth(request(app).patch(`/api/v1/wishes/${wish._id}/mode`)).send({ mode: 'ask' })).status).toBe(409);
+  });
+});
+
+describe('undo a purchase', () => {
+  async function boughtWish() {
+    const wish = await watchedWish();
+    return (await auth(request(app).post(`/api/v1/wishes/${wish._id}/simulate-drop`)).send({ price: 129 })).body.wish;
+  }
+
+  test('refunds the full amount through PayPal, once', async () => {
+    const wish = await boughtWish();
+    const res = await auth(request(app).post(`/api/v1/wishes/${wish._id}/refund`));
+    expect(res.status).toBe(200);
+    expect(res.body.wish.status).toBe('refunded');
+    expect(res.body.wish.payment).toMatchObject({ status: 'refunded', refundId: 'REFUND-1' });
+    const [call] = paypalCalls(/CAPTURE-1\/refund$/);
+    expect(call.requestId).toBe(`refund-${wish._id}`);
+    expect((await auth(request(app).post(`/api/v1/wishes/${wish._id}/refund`))).status).toBe(409);
+    // A refunded purchase no longer counts as savings.
+    expect((await auth(request(app).get('/api/v1/wishes/stats'))).body).toMatchObject({ bought: 0, saved: 0 });
+  });
+
+  test('undo is only offered for 24 hours', async () => {
+    const wish = await boughtWish();
+    await Wish.updateOne({ _id: wish._id }, { 'purchase.at': new Date(Date.now() - 25 * 3600_000) });
+    const res = await auth(request(app).post(`/api/v1/wishes/${wish._id}/refund`));
+    expect(res.status).toBe(409);
+    expect(paypalCalls(/refund$/)).toHaveLength(0);
+  });
+
+  test('a wish that was never bought cannot be refunded', async () => {
+    const wish = await watchedWish();
+    expect((await auth(request(app).post(`/api/v1/wishes/${wish._id}/refund`))).status).toBe(409);
   });
 });
 

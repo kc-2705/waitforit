@@ -11,7 +11,11 @@ const price = z.coerce.number('Enter a price.').positive('Price must be more tha
 const createSchema = z.object({
   text: z.string().trim().min(3, 'Tell me what you want to buy.').max(500, 'Please keep it under 500 characters.'),
   maxPrice: price.optional().nullable(),
+  mode: z.enum(['auto', 'ask']).default('auto'),
 });
+
+// A hold is still in place while the agent watches or waits for the user's OK.
+const HOLDING = ['watching', 'awaiting_approval'];
 
 async function findOwn(req) {
   if (!mongoose.isValidObjectId(req.params.id)) throw new HttpError(400, 'Invalid id.');
@@ -28,10 +32,10 @@ async function list(req, res) {
 async function stats(req, res) {
   const wishes = await Wish.find({ user: req.userId }).select('status payment purchase').lean();
   res.json({
-    watching: wishes.filter((w) => w.status === 'watching').length,
-    held: wishes.filter((w) => w.status === 'watching').reduce((s, w) => s + (w.payment?.held ?? 0), 0),
+    watching: wishes.filter((w) => HOLDING.includes(w.status)).length,
+    held: wishes.filter((w) => HOLDING.includes(w.status)).reduce((s, w) => s + (w.payment?.held ?? 0), 0),
     bought: wishes.filter((w) => w.status === 'bought').length,
-    saved: wishes.reduce((s, w) => s + (w.purchase?.saved ?? 0), 0),
+    saved: wishes.filter((w) => w.status === 'bought').reduce((s, w) => s + (w.purchase?.saved ?? 0), 0),
   });
 }
 
@@ -40,8 +44,8 @@ async function get(req, res) {
 }
 
 async function create(req, res) {
-  const { text, maxPrice } = createSchema.parse(req.body);
-  const wish = await agent.startWish(req.userId, text, maxPrice ?? null);
+  const { text, maxPrice, mode } = createSchema.parse(req.body);
+  const wish = await agent.startWish(req.userId, text, maxPrice ?? null, mode);
   res.status(201).json({ wish });
 }
 
@@ -108,9 +112,33 @@ async function simulateDrop(req, res) {
   res.json({ wish: await agent.check(wish, { simulatedPrice: Math.round(newPrice * 100) / 100 }) });
 }
 
+async function setMode(req, res) {
+  const { mode } = z.object({ mode: z.enum(['auto', 'ask']) }).parse(req.body);
+  const wish = await findOwn(req);
+  if (!['choosing', 'needs_payment', 'watching'].includes(wish.status)) throw new HttpError(409, 'You can only change this while the agent is still shopping.');
+  if (wish.mode !== mode) {
+    wish.mode = mode;
+    wish.log('think', mode === 'ask' ? 'Got it: I will ask you before I buy.' : 'Got it: I will buy as soon as I find a good deal.');
+    await wish.save();
+  }
+  res.json({ wish });
+}
+
+async function approve(req, res) {
+  res.json({ wish: await agent.approve(await findOwn(req)) });
+}
+
+async function decline(req, res) {
+  res.json({ wish: await agent.decline(await findOwn(req)) });
+}
+
+async function refund(req, res) {
+  res.json({ wish: await agent.refund(await findOwn(req)) });
+}
+
 async function cancel(req, res) {
   const wish = await findOwn(req);
-  if (['bought', 'buying'].includes(wish.status)) throw new HttpError(409, 'This wish was already bought.');
+  if (['bought', 'buying', 'refunded'].includes(wish.status)) throw new HttpError(409, 'This wish was already bought.');
   if (['cancelled', 'expired'].includes(wish.status)) return res.json({ wish });
   if (wish.payment.status === 'held' && !wish.payment.sample) {
     await paypal.voidHold(wish.payment.authorizationId);
@@ -120,15 +148,16 @@ async function cancel(req, res) {
     wish.log('cancel', 'Stopped. Nothing was charged.');
   }
   wish.status = 'cancelled';
+  wish.pending = undefined;
   await wish.save();
   res.json({ wish });
 }
 
 async function remove(req, res) {
   const wish = await findOwn(req);
-  if (['watching', 'buying'].includes(wish.status)) throw new HttpError(409, 'Stop watching first, so your PayPal hold is released.');
+  if ([...HOLDING, 'buying'].includes(wish.status)) throw new HttpError(409, 'Stop watching first, so your PayPal hold is released.');
   await wish.deleteOne();
   res.status(204).end();
 }
 
-module.exports = { list, stats, get, create, choose, createOrder, authorize, check, simulateDrop, cancel, remove };
+module.exports = { list, stats, get, create, choose, setMode, createOrder, authorize, check, simulateDrop, approve, decline, refund, cancel, remove };

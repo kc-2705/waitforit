@@ -17,7 +17,7 @@ module.exports = {
   jwtExpiresIn: process.env.JWT_EXPIRES_IN || '7d',
   // Comma-separated list of front-end origins allowed to call the API.
   // Render passes the website's bare service name, so https:// and .onrender.com are added when missing.
-  clientOrigins: (process.env.CLIENT_URL || 'http://localhost:5173')
+  clientOrigins: (process.env.CLIENT_URL || 'http://localhost:4173')
     .split(',')
     .map((s) => s.trim().replace(/\/+$/, ''))
     .filter(Boolean)

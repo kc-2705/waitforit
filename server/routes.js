@@ -49,6 +49,10 @@ router.post('/wishes/:id/paypal/order', wishes.createOrder);
 router.post('/wishes/:id/paypal/authorize', agentLimiter, wishes.authorize);
 router.post('/wishes/:id/check', agentLimiter, wishes.check);
 router.post('/wishes/:id/simulate-drop', agentLimiter, wishes.simulateDrop);
+router.patch('/wishes/:id/mode', wishes.setMode);
+router.post('/wishes/:id/approve', agentLimiter, wishes.approve);
+router.post('/wishes/:id/decline', wishes.decline);
+router.post('/wishes/:id/refund', agentLimiter, wishes.refund);
 router.post('/wishes/:id/cancel', wishes.cancel);
 
 module.exports = router;

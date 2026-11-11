@@ -1,30 +1,27 @@
 {
-  "name": "waitforit-client",
+  "name": "waitforit-web",
   "private": true,
-  "version": "1.0.0",
-  "type": "module",
+  "version": "2.0.0",
   "scripts": {
-    "dev": "vite",
-    "build": "vite build",
-    "preview": "vite preview",
-    "lint": "eslint src"
+    "dev": "next dev --port 4173",
+    "build": "next build && node scripts/flatten-segments.mjs",
+    "start": "python -m http.server 4173 -d out",
+    "typecheck": "tsc --noEmit"
   },
   "dependencies": {
     "@ant-design/icons": "^6.3.4",
-    "@tanstack/react-query": "^5.104.2",
-    "antd": "^6.6.6",
-    "axios": "^1.20.0",
+    "@ant-design/nextjs-registry": "^1.3.0",
+    "@tanstack/react-query": "^5.107.1",
+    "antd": "^6.7.0",
     "dayjs": "^1.11.23",
+    "next": "^16.4.6",
     "react": "^19.3.1",
-    "react-dom": "^19.3.1",
-    "react-router-dom": "^7.18.4"
+    "react-dom": "^19.3.1"
   },
   "devDependencies": {
-    "@eslint/js": "^10.0.1",
-    "@vitejs/plugin-react": "^6.1.2",
-    "eslint": "^10.12.0",
-    "eslint-plugin-react-hooks": "^7.1.1",
-    "globals": "^17.13.0",
-    "vite": "^8.3.4"
+    "@types/node": "^22.20.5",
+    "@types/react": "^19.3.0",
+    "@types/react-dom": "^19.3.0",
+    "typescript": "^5.9.3"
   }
 }
