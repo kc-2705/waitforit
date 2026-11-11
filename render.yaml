@@ -1,0 +1,67 @@
+# Render Blueprint.
+# - waitforit-web: the Next.js website, exported as a static site. Free static sites never sleep, so it
+#   opens instantly and plays the opening animation while it wakes the API.
+# - waitforit-api: the Express API and price watcher. On the free plan it sleeps after 15 idle minutes.
+# Secrets (sync: false) are asked for when the Blueprint is created.
+services:
+  - type: web
+    name: waitforit-api
+    runtime: node
+    plan: free
+    # --omit=dev skips the test tools (one of them downloads a MongoDB binary).
+    buildCommand: npm ci --omit=dev
+    startCommand: npm start
+    healthCheckPath: /api/v1/health
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: MONGO_URL
+        sync: false
+      - key: GROQ_API_KEY
+        sync: false
+      - key: CHANNEL3_API_KEY
+        sync: false
+      - key: PAYPAL_CLIENT_ID
+        sync: false
+      - key: PAYPAL_CLIENT_SECRET
+        sync: false
+      - key: JWT_SECRET
+        generateValue: true
+      # Recreate the demo account at each start, so visitors always see a clean example.
+      - key: SEED_DEMO
+        value: "true"
+      # Keep the "Simulate drop" button for judges; real price drops can take days.
+      - key: DEMO_TOOLS
+        value: "true"
+      # The website's address, so browsers there may call this API.
+      - key: CLIENT_URL
+        fromService:
+          name: waitforit-web
+          type: web
+          property: host
+
+  - type: web
+    name: waitforit-web
+    runtime: static
+    buildCommand: npm ci --prefix client && npm run build --prefix client
+    staticPublishPath: client/out
+    pullRequestPreviewsEnabled: false
+    headers:
+      # File names under /_next/static change on every build, so browsers may keep them for a year.
+      - path: /_next/static/*
+        name: Cache-Control
+        value: public, max-age=31536000, immutable
+      # Pages keep Render's default (revalidated on every visit), so new deploys show up at once.
+      - path: /*
+        name: X-Content-Type-Options
+        value: nosniff
+      - path: /*
+        name: Referrer-Policy
+        value: strict-origin-when-cross-origin
+    envVars:
+      # Where the website finds the API (Render passes the bare host; the app adds https://).
+      - key: NEXT_PUBLIC_API_URL
+        fromService:
+          name: waitforit-api
+          type: web
+          property: host
