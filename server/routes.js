@@ -26,9 +26,10 @@ const agentLimiter = limiter(60, 'You have asked the agent a lot in a short time
 router.get('/health', (req, res) => res.json({ ok: true }));
 
 // Public settings the website needs: the PayPal client id is meant to be public.
-router.get('/config', (req, res) =>
-  res.json({ paypalClientId: env.paypal.clientId, currency: env.paypal.currency, demoTools: env.demoTools }),
-);
+router.get('/config', (req, res) => {
+  res.set('Cache-Control', 'public, max-age=300');
+  res.json({ paypalClientId: env.paypal.clientId, currency: env.paypal.currency, demoTools: env.demoTools });
+});
 
 router.post('/auth/register', authLimiter, auth.register);
 router.post('/auth/login', authLimiter, auth.login);

@@ -1,5 +1,6 @@
 const env = require('../config/env');
 const { HttpError } = require('../middleware/errors');
+const { TtlCache } = require('./cache');
 
 // Channel3: one API for products and live prices across many stores.
 // Search costs one credit (1,000 free a month). Looking up a product by id is free,
@@ -75,26 +76,41 @@ function toProduct(p, condition) {
   };
 }
 
+// Each search costs a credit from a monthly quota, so the same search is reused for 15 minutes.
+// Product lookups are free but slow, so the watcher and "Check now" share one result for 2 minutes.
+const searchCache = new TtlCache({ ttlMs: 15 * 60_000, max: 200 });
+const productCache = new TtlCache({ ttlMs: 2 * 60_000, max: 1000 });
+
 /** Searches for products a little above the target price, so there is something worth waiting on. */
 async function search(query, { maxPrice, condition = 'new', limit = 12 } = {}) {
-  const data = await call('/v1/search', {
-    method: 'POST',
-    body: {
-      query,
-      limit,
-      filters: {
-        availability: ['InStock', 'LimitedAvailability'],
-        ...(maxPrice ? { price: { max_price: Math.ceil(maxPrice * 1.6) } } : {}),
+  const maxFilter = maxPrice ? Math.ceil(maxPrice * 1.6) : null;
+  const key = JSON.stringify([query.trim().toLowerCase(), maxFilter, limit]);
+  const data = await searchCache.wrap(key, () =>
+    call('/v1/search', {
+      method: 'POST',
+      body: {
+        query,
+        limit,
+        filters: {
+          availability: ['InStock', 'LimitedAvailability'],
+          ...(maxFilter ? { price: { max_price: maxFilter } } : {}),
+        },
       },
-    },
-  });
+    }),
+  );
   return (data?.products ?? []).map((p) => toProduct(p, condition)).filter((p) => p.productId && p.bestOffer);
 }
 
-/** Fresh offers for one product (free). Returns null if the product is gone. */
+/** Recent offers for one product (free). Returns null if the product is gone. */
 async function product(productId, condition = 'new') {
-  const data = await call(`/v1/products/${encodeURIComponent(productId)}`);
+  const data = await productCache.wrap(productId, () => call(`/v1/products/${encodeURIComponent(productId)}`));
   return data ? toProduct(data, condition) : null;
 }
 
-module.exports = { search, product, eligibleOffers, cheapest, toProduct };
+const cacheStats = () => ({ search: searchCache.stats(), product: productCache.stats() });
+const clearCaches = () => {
+  searchCache.clear();
+  productCache.clear();
+};
+
+module.exports = { search, product, eligibleOffers, cheapest, toProduct, cacheStats, clearCaches };

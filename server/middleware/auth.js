@@ -2,6 +2,10 @@ const jwt = require('jsonwebtoken');
 const env = require('../config/env');
 const User = require('../models/User');
 const { HttpError } = require('./errors');
+const { TtlCache } = require('../services/cache');
+
+const knownUsers = new TtlCache({ ttlMs: 60_000, max: 5000 });
+const forgetUser = (userId) => knownUsers.delete(String(userId));
 
 function signToken(userId) {
   return jwt.sign({ sub: userId.toString() }, env.jwtSecret(), { expiresIn: env.jwtExpiresIn });
@@ -19,10 +23,13 @@ async function requireAuth(req, res, next) {
   } catch {
     throw new HttpError(401, 'Your session has expired. Please log in again.');
   }
-  // A token outlives a deleted account, so check the account still exists.
-  if (!(await User.exists({ _id: payload.sub }))) throw new HttpError(401, 'Please log in.');
+  // A token outlives a deleted account, so check the account still exists. The answer is remembered
+  // for a minute (and forgotten at once when the account is deleted), which halves database reads.
+  const exists = knownUsers.get(payload.sub) ?? Boolean(await User.exists({ _id: payload.sub }));
+  if (!exists) throw new HttpError(401, 'Please log in.');
+  knownUsers.set(payload.sub, true);
   req.userId = payload.sub;
   next();
 }
 
-module.exports = { signToken, requireAuth };
+module.exports = { signToken, requireAuth, forgetUser };

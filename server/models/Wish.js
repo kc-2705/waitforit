@@ -44,7 +44,7 @@ const eventSchema = new Schema(
 
 const wishSchema = new Schema(
   {
-    user: { type: Schema.Types.ObjectId, ref: 'User', required: true, index: true },
+    user: { type: Schema.Types.ObjectId, ref: 'User', required: true },
     text: { type: String, required: true, maxlength: 500 },
     // What the AI understood from the wish.
     plan: {
@@ -71,7 +71,6 @@ const wishSchema = new Schema(
       type: String,
       enum: ['choosing', 'needs_payment', 'watching', 'awaiting_approval', 'buying', 'bought', 'refunded', 'cancelled', 'expired'],
       default: 'choosing',
-      index: true,
     },
     candidates: [productSchema],
     chosen: productSchema,
@@ -114,6 +113,10 @@ const wishSchema = new Schema(
   },
   { timestamps: true },
 );
+
+// "My wishes" lists a user's wishes newest first; the watcher looks for watched wishes due a check.
+wishSchema.index({ user: 1, updatedAt: -1 });
+wishSchema.index({ status: 1, lastCheckedAt: 1 });
 
 wishSchema.methods.log = function log(kind, message) {
   this.journal.push({ kind, message });

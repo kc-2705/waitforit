@@ -60,6 +60,9 @@ export function ThemeProvider({ children }: { children: React.ReactNode }) {
             colorLink: c.accent,
             colorText: c.text,
             colorTextSecondary: c.muted,
+            // Ant Design's default description gray fails WCAG AA contrast on white; use ours.
+            colorTextDescription: c.muted,
+            colorTextTertiary: c.muted,
             colorBorder: c.border,
             colorBorderSecondary: c.border,
             colorBgLayout: c.bg,

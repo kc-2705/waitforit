@@ -12,7 +12,8 @@ const mongoose = require('mongoose');
 const { MongoMemoryServer } = require('mongodb-memory-server');
 const { createApp } = require('../server/app');
 const { connectDb, disconnectDb } = require('../server/config/db');
-const { toProduct } = require('../server/services/channel3');
+const { toProduct, clearCaches } = require('../server/services/channel3');
+const { TtlCache } = require('../server/services/cache');
 const Wish = require('../server/models/Wish');
 
 // ---------------------------------------------------------------- Fakes for the three outside services
@@ -134,6 +135,7 @@ after(async () => {
 beforeEach(async () => {
   resetWorld();
   require('../server/services/paypal')._reset();
+  clearCaches();
   await mongoose.connection.db.dropDatabase();
   token = await signUp();
 });
@@ -300,6 +302,8 @@ describe('stopping and privacy', () => {
   test('deleting your account releases any PayPal holds first', async () => {
     await watchedWish();
     expect((await auth(request(app).delete('/api/v1/auth/me'))).status).toBe(204);
+    // The account check is cached for speed, but deleting the account clears it right away.
+    expect((await auth(request(app).get('/api/v1/wishes'))).status).toBe(401);
     expect(paypalCalls(/void$/)).toHaveLength(1);
     expect(await Wish.countDocuments()).toBe(0);
   });
@@ -414,6 +418,50 @@ describe('undo a purchase', () => {
   test('a wish that was never bought cannot be refunded', async () => {
     const wish = await watchedWish();
     expect((await auth(request(app).post(`/api/v1/wishes/${wish._id}/refund`))).status).toBe(409);
+  });
+});
+
+describe('speed and caching', () => {
+  test('the same search within 15 minutes is reused, saving a paid search credit', async () => {
+    await auth(request(app).post('/api/v1/wishes')).send({ text: 'Sony headphones under $150' }).expect(201);
+    await auth(request(app).post('/api/v1/wishes')).send({ text: 'Sony headphones under $150 again' }).expect(201);
+    expect(world.calls.search).toBe(1);
+  });
+
+  test('price checks share one product lookup for a short time', async () => {
+    const wish = await watchedWish();
+    const before = world.calls.product;
+    await auth(request(app).post(`/api/v1/wishes/${wish._id}/check`)).expect(200);
+    await auth(request(app).post(`/api/v1/wishes/${wish._id}/check`)).expect(200);
+    expect(world.calls.product).toBe(before);
+  });
+
+  test('personal data is never cached; the public config is', async () => {
+    const list = await auth(request(app).get('/api/v1/wishes'));
+    expect(list.headers['cache-control']).toBe('private, no-store');
+    const config = await request(app).get('/api/v1/config');
+    expect(config.headers['cache-control']).toBe('public, max-age=300');
+  });
+
+  test('large responses are gzip-compressed', async () => {
+    const wish = await watchedWish();
+    const res = await auth(request(app).get(`/api/v1/wishes/${wish._id}`)).set('Accept-Encoding', 'gzip');
+    expect(res.headers['content-encoding']).toBe('gzip');
+  });
+
+  test('the cache expires entries, caps its size and shares one in-flight request', async () => {
+    const cache = new TtlCache({ ttlMs: 20, max: 2 });
+    let runs = 0;
+    const slow = () => new Promise((r) => setTimeout(() => r(++runs), 5));
+    const [a, b] = await Promise.all([cache.wrap('k', slow), cache.wrap('k', slow)]);
+    expect([a, b, runs]).toEqual([1, 1, 1]);
+    cache.set('x', 1);
+    cache.set('y', 2);
+    expect(cache.get('k')).toBeUndefined(); // pushed out by the size cap
+    await new Promise((r) => setTimeout(r, 30));
+    expect(cache.get('y')).toBeUndefined(); // expired
+    await expect(cache.wrap('bad', () => Promise.reject(new Error('down')))).rejects.toThrow('down');
+    expect(await cache.wrap('bad', () => Promise.resolve('ok'))).toBe('ok'); // errors are not cached
   });
 });
 

@@ -3,7 +3,7 @@ const { z } = require('zod');
 const User = require('../models/User');
 const Wish = require('../models/Wish');
 const paypal = require('../services/paypal');
-const { signToken } = require('../middleware/auth');
+const { signToken, forgetUser } = require('../middleware/auth');
 const { HttpError } = require('../middleware/errors');
 
 // Trim first: emails pasted from elsewhere often carry a stray space.
@@ -43,6 +43,7 @@ async function deleteAccount(req, res) {
   const held = await Wish.find({ user: req.userId, 'payment.status': 'held', 'payment.sample': { $ne: true } }).select('payment');
   for (const w of held) await paypal.voidHold(w.payment.authorizationId).catch((err) => console.error(`Void failed: ${err.message}`));
   await Promise.all([Wish.deleteMany({ user: req.userId }), User.deleteOne({ _id: req.userId })]);
+  forgetUser(req.userId);
   res.status(204).end();
 }
 

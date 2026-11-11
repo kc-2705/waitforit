@@ -71,7 +71,7 @@ export default function Landing() {
           {STEPS.map((s, i) => (
             <div className="feature" key={s.title}>
               <div className="num">{i + 1}</div>
-              <h3>{s.title}</h3>
+              <h2>{s.title}</h2>
               <p>{s.text}</p>
             </div>
           ))}
