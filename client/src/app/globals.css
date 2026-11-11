@@ -92,9 +92,88 @@ a {
 .splash-inner {
   display: grid;
   justify-items: center;
-  gap: 18px;
+  gap: 10px;
   padding: 0 24px;
   text-align: center;
+}
+
+/* -- intro: price line falls to the limit, price changes, check mark -- */
+.intro {
+  width: 280px;
+  height: 140px;
+  overflow: visible;
+  margin-bottom: 8px;
+}
+
+.intro-limit {
+  stroke: var(--muted);
+  stroke-width: 1.5;
+  stroke-dasharray: 5 4;
+  opacity: 0;
+  animation: intro-fade 0.4s 0.1s ease-out forwards;
+}
+
+.intro-limit-label {
+  fill: var(--muted);
+  font-size: 11px;
+  font-family: var(--font-inter), system-ui, sans-serif;
+  opacity: 0;
+  animation: intro-fade 0.4s 0.2s ease-out forwards;
+}
+
+.intro-line {
+  fill: none;
+  stroke: var(--accent);
+  stroke-width: 2.5;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  stroke-dasharray: 240;
+  stroke-dashoffset: 240;
+  animation: intro-draw 1s 0.25s cubic-bezier(0.4, 0, 0.2, 1) forwards;
+}
+
+.intro-dot {
+  fill: var(--accent);
+  opacity: 0;
+  animation: intro-fade 0.2s 1.2s forwards;
+}
+
+.intro-check {
+  transform-box: fill-box;
+  transform-origin: center;
+  transform: scale(0.4);
+  opacity: 0;
+  animation: intro-pop 0.4s 1.35s cubic-bezier(0.3, 1.5, 0.5, 1) forwards;
+}
+
+.intro-check circle {
+  fill: var(--good);
+}
+
+.intro-check path {
+  fill: none;
+  stroke: #fff;
+  stroke-width: 2.2;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+.intro-price {
+  font-size: 16px;
+  font-weight: 700;
+  font-family: var(--font-inter), system-ui, sans-serif;
+  font-variant-numeric: tabular-nums;
+}
+
+.intro-old {
+  fill: var(--muted);
+  animation: intro-out 0.3s 1.05s ease-in forwards;
+}
+
+.intro-new {
+  fill: var(--accent);
+  opacity: 0;
+  animation: intro-fade 0.3s 1.25s ease-out forwards;
 }
 
 .splash-brand {
@@ -104,6 +183,31 @@ a {
   font-size: 22px;
   font-weight: 700;
   letter-spacing: -0.01em;
+  opacity: 0;
+  transform: translateY(6px);
+  animation: intro-rise 0.45s 0.5s ease-out forwards;
+}
+
+.splash-tagline {
+  font-size: 14px;
+  color: var(--muted);
+  opacity: 0;
+  animation: intro-fade 0.45s 0.75s ease-out forwards;
+}
+
+/* Only shown if the free server is still waking up. */
+.splash-wait {
+  display: grid;
+  justify-items: center;
+  gap: 10px;
+  margin-top: 14px;
+  min-height: 40px;
+  opacity: 0;
+  transition: opacity 0.3s;
+}
+
+#splash.waiting .splash-wait {
+  opacity: 1;
 }
 
 .splash-bar {
@@ -127,12 +231,46 @@ a {
   margin: 0;
   font-size: 13px;
   color: var(--muted);
-  opacity: 0;
-  transition: opacity 0.3s;
 }
 
-#splash.waiting p {
-  opacity: 1;
+/* Returning in the same visit: skip straight to the end state. */
+#splash.quick *,
+#splash.quick *::after {
+  animation-delay: 0s !important;
+  animation-duration: 0.01s !important;
+}
+
+@keyframes intro-draw {
+  to {
+    stroke-dashoffset: 0;
+  }
+}
+
+@keyframes intro-fade {
+  to {
+    opacity: 1;
+  }
+}
+
+@keyframes intro-out {
+  to {
+    opacity: 0;
+    transform: translateY(-6px);
+  }
+}
+
+@keyframes intro-pop {
+  to {
+    opacity: 1;
+    transform: scale(1);
+  }
+}
+
+@keyframes intro-rise {
+  to {
+    opacity: 1;
+    transform: none;
+  }
 }
 
 @keyframes splash-slide {
@@ -145,9 +283,10 @@ a {
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .splash-bar::after {
-    animation: none;
-    width: 100%;
+  #splash *,
+  #splash *::after {
+    animation-delay: 0s !important;
+    animation-duration: 0.01s !important;
   }
 }
 
