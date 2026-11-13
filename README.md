@@ -6,6 +6,8 @@ WaitForIt is an AI shopping agent. You describe what you want and the most you'l
 
 **Live demo:** https://waitforit-web.onrender.com (click **Try the demo**; the free server may take up to a minute to wake up)
 
+**Write-up:** [I built an AI shopping agent that waits for the right price, and it can't overspend](https://dev.to/kavyachowdary_immanni/i-built-an-ai-shopping-agent-that-waits-for-the-right-price-and-it-cant-overspend-4lhg) on DEV: how the PayPal hold works, how the AI is kept in check, and what testing caught.
+
 ![WaitForIt landing page](docs/screenshots/landing.png)
 
 ## The everyday problem
